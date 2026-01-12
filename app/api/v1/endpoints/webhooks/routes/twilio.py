@@ -66,19 +66,28 @@ async def twilio_whatsapp_webhook(
         logger.info(f"\n📨 Parsed Message Data:")
         logger.info(json.dumps(message_data, indent=2, ensure_ascii=False))
         
+        # Send typing indicator immediately (user will see "typing..." status)
+        message_sid = message_data.get("message_sid")
+        if message_sid:
+            try:
+                twilio_service.send_typing_indicator(message_sid)
+                logger.info(f"⌨️  Typing indicator sent for message: {message_sid}")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to send typing indicator: {str(e)}")
+                # Don't fail the webhook if typing indicator fails
+        
         # Process message asynchronously via Celery
+        # The intelligent response will be sent by the Celery task
         task = process_whatsapp_message.delay(message_data)
         logger.info(f"\n✅ WhatsApp message task queued: {task.id}")
         logger.info(f"📤 From: {message_data.get('from_number')}")
         logger.info(f"💬 Message: {message_data.get('body')}")
         logger.info("=" * 80)
         
-        # Return immediate response to Twilio (TwiML)
-        # You can customize this response based on your bot logic
-        response_message = "Message received! We'll get back to you shortly."
-        
-        # Create TwiML response using integration service
-        twiml_response = twilio_service.create_twiml_response(response_message)
+        # Return empty TwiML response
+        # The actual intelligent response will be sent by the Celery task
+        # This prevents duplicate messages
+        twiml_response = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
         
         return Response(content=twiml_response, media_type="application/xml")
         

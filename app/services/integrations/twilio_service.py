@@ -116,6 +116,60 @@ class TwilioIntegrationService:
             logger.error("Twilio SDK not installed, returning basic TwiML")
             return f"<?xml version='1.0' encoding='UTF-8'?><Response><Message>{message}</Message></Response>"
     
+    def send_typing_indicator(self, message_sid: str) -> Dict[str, Any]:
+        """
+        Send typing indicator to WhatsApp user
+        
+        This shows the "typing..." indicator to the user while processing their message.
+        The indicator automatically disappears when a message is sent or after 25 seconds.
+        
+        Uses Twilio's Messaging API v2 Typing Indicators endpoint.
+        
+        Args:
+            message_sid: The SID of the message being responded to (from webhook)
+                        Format: SMxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        
+        Returns:
+            Result of sending typing indicator
+        """
+        try:
+            if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+                raise ValueError("Twilio credentials not configured")
+            
+            # Twilio SDK includes requests library as a dependency
+            # Use requests to call Twilio's Typing Indicators API
+            import requests
+            
+            url = "https://messaging.twilio.com/v2/Indicators/Typing.json"
+            auth = (settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+            data = {
+                "messageId": message_sid,
+                "channel": "whatsapp"
+            }
+            
+            response = requests.post(url, auth=auth, data=data, timeout=5)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f"✅ Typing indicator sent for message: {message_sid}")
+            
+            return {
+                "success": True,
+                "message_sid": message_sid,
+                "result": result,
+            }
+            
+        except ImportError:
+            raise ValueError("requests library not available (should be installed with Twilio SDK)")
+        except Exception as e:
+            # Handle both HTTPError and other exceptions
+            if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                logger.error(f"HTTP error sending typing indicator: {e.response.status_code} - {e.response.text}")
+                raise ValueError(f"Failed to send typing indicator: {e.response.status_code}")
+            else:
+                logger.error(f"Error sending typing indicator: {str(e)}", exc_info=True)
+                raise
+    
     def send_message(
         self,
         to: str,

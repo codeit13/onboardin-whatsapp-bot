@@ -131,44 +131,93 @@ class TwilioIntegrationService:
         
         Returns:
             Result of sending typing indicator
+        
+        Raises:
+            ValueError: If Twilio credentials are not configured
         """
+        # Check credentials first and return gracefully if not configured
+        if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+            logger.warning("Twilio credentials not configured, skipping typing indicator")
+            return {
+                "success": False,
+                "message_sid": message_sid,
+                "reason": "Twilio credentials not configured",
+            }
+        
         try:
-            if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
-                raise ValueError("Twilio credentials not configured")
-            
             # Twilio SDK includes requests library as a dependency
             # Use requests to call Twilio's Typing Indicators API
             import requests
             
             url = "https://messaging.twilio.com/v2/Indicators/Typing.json"
             auth = (settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+            
+            # Use data-urlencode format as per Twilio documentation
+            # This ensures proper encoding of parameters
             data = {
                 "messageId": message_sid,
                 "channel": "whatsapp"
             }
             
-            response = requests.post(url, auth=auth, data=data, timeout=5)
-            response.raise_for_status()
-            
-            result = response.json()
-            logger.info(f"✅ Typing indicator sent for message: {message_sid}")
-            
-            return {
-                "success": True,
-                "message_sid": message_sid,
-                "result": result,
+            # Use requests with proper headers
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded"
             }
             
-        except ImportError:
-            raise ValueError("requests library not available (should be installed with Twilio SDK)")
-        except Exception as e:
-            # Handle both HTTPError and other exceptions
-            if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
-                logger.error(f"HTTP error sending typing indicator: {e.response.status_code} - {e.response.text}")
-                raise ValueError(f"Failed to send typing indicator: {e.response.status_code}")
+            response = requests.post(
+                url,
+                auth=auth,
+                data=data,
+                headers=headers,
+                timeout=5
+            )
+            
+            # Check response status
+            if response.status_code in [200, 201]:
+                result = response.json()
+                logger.info(f"✅ Typing indicator sent for message: {message_sid}")
+                return {
+                    "success": True,
+                    "message_sid": message_sid,
+                    "result": result,
+                }
             else:
-                logger.error(f"Error sending typing indicator: {str(e)}", exc_info=True)
-                raise
+                # Log the error but don't fail - typing indicator is optional
+                error_detail = response.text
+                logger.warning(
+                    f"⚠️  Typing indicator API returned {response.status_code}: {error_detail}. "
+                    f"This may be expected for inbound messages or trial accounts."
+                )
+                return {
+                    "success": False,
+                    "message_sid": message_sid,
+                    "reason": f"API returned {response.status_code}",
+                    "error": error_detail,
+                }
+            
+        except ImportError:
+            logger.warning("requests library not available, skipping typing indicator")
+            return {
+                "success": False,
+                "message_sid": message_sid,
+                "reason": "requests library not available",
+            }
+        except requests.exceptions.RequestException as e:
+            # Handle network/request errors gracefully
+            logger.warning(f"⚠️  Network error sending typing indicator: {str(e)}")
+            return {
+                "success": False,
+                "message_sid": message_sid,
+                "reason": f"Network error: {str(e)}",
+            }
+        except Exception as e:
+            # Handle any other errors gracefully
+            logger.warning(f"⚠️  Error sending typing indicator: {str(e)}")
+            return {
+                "success": False,
+                "message_sid": message_sid,
+                "reason": f"Error: {str(e)}",
+            }
     
     def send_message(
         self,

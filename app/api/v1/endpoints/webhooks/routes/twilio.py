@@ -67,14 +67,18 @@ async def twilio_whatsapp_webhook(
         logger.info(json.dumps(message_data, indent=2, ensure_ascii=False))
         
         # Send typing indicator immediately (user will see "typing..." status)
+        # Note: Typing indicators may not work for all message types or trial accounts
         message_sid = message_data.get("message_sid")
         if message_sid:
-            try:
-                twilio_service.send_typing_indicator(message_sid)
+            result = twilio_service.send_typing_indicator(message_sid)
+            if result.get("success"):
                 logger.info(f"⌨️  Typing indicator sent for message: {message_sid}")
-            except Exception as e:
-                logger.warning(f"⚠️  Failed to send typing indicator: {str(e)}")
-                # Don't fail the webhook if typing indicator fails
+            else:
+                # Log as debug since this is optional and may fail for valid reasons
+                logger.debug(
+                    f"⏭️  Typing indicator not sent: {result.get('reason', 'Unknown reason')}. "
+                    f"This is optional and won't affect message processing."
+                )
         
         # Process message asynchronously via Celery
         # The intelligent response will be sent by the Celery task

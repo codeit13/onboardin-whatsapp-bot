@@ -68,9 +68,11 @@ def start_celery_worker() -> subprocess.Popen | None:
     
     try:
         print("🔄 Starting Celery worker...")
+        # Use unbuffered output so logs appear immediately
         process = subprocess.Popen(
             [
                 sys.executable,
+                "-u",  # Unbuffered output
                 "-m",
                 "celery",
                 "-A",
@@ -78,9 +80,12 @@ def start_celery_worker() -> subprocess.Popen | None:
                 "worker",
                 "--loglevel=info",
                 "--concurrency=4",
+                "--without-gossip",
+                "--without-mingle",
+                "--without-heartbeat",
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=None,  # Don't capture - let it go to console
+            stderr=None,  # Don't capture - let it go to console
         )
         print(f"   ✅ Celery worker started (PID: {process.pid})")
         return process

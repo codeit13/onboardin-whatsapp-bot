@@ -29,8 +29,10 @@ celery_app.conf.update(
 )
 
 # Optional: Configure task routes
+# Note: whatsapp_tasks will use default "celery" queue
 celery_app.conf.task_routes = {
     "app.tasks.webhook_tasks.*": {"queue": "webhooks"},
     "app.tasks.onboarding_tasks.*": {"queue": "onboarding"},
+    # whatsapp_tasks uses default queue (no routing needed)
 }
 

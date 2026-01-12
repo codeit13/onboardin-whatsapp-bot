@@ -88,10 +88,11 @@ async def twilio_whatsapp_webhook(
         logger.info(f"💬 Message: {message_data.get('body')}")
         logger.info("=" * 80)
         
-        # Return empty TwiML response
-        # The actual intelligent response will be sent by the Celery task
-        # This prevents duplicate messages
-        twiml_response = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
+        # Return immediate acknowledgment message
+        # The intelligent response will be sent by the Celery task
+        # This gives user immediate feedback while processing happens in background
+        response_message = "Message received! We'll get back to you shortly."
+        twiml_response = twilio_service.create_twiml_response(response_message)
         
         return Response(content=twiml_response, media_type="application/xml")
         

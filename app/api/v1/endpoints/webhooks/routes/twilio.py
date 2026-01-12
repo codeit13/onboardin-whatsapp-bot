@@ -1,6 +1,7 @@
 """
 Twilio WhatsApp webhook routes
 """
+import json
 import logging
 from fastapi import APIRouter, Request, HTTPException, status, Header
 from fastapi.responses import Response
@@ -36,25 +37,41 @@ async def twilio_whatsapp_webhook(
         form_data = await request.form()
         form_dict = dict(form_data)
         
+        # Log raw payload received
+        logger.info("=" * 80)
+        logger.info("📥 TWILIO WEBHOOK RECEIVED")
+        logger.info("=" * 80)
+        logger.info(f"🔗 URL: {request.url}")
+        logger.info(f"🌐 Method: {request.method}")
+        logger.info(f"📋 Headers:")
+        for key, value in request.headers.items():
+            logger.info(f"   {key}: {value}")
+        logger.info(f"\n📦 Raw Form Data (as received):")
+        logger.info(json.dumps(form_dict, indent=2, ensure_ascii=False))
+        
         # Verify request signature using integration service
         if x_twilio_signature and settings.TWILIO_AUTH_TOKEN:
             url = str(request.url)
             if not twilio_service.verify_signature(url, form_dict, x_twilio_signature):
-                logger.warning("Invalid Twilio signature")
+                logger.warning("⚠️  Invalid Twilio signature")
                 # In production, you might want to reject invalid signatures
                 # For now, we'll log and continue for development
+            else:
+                logger.info("✅ Twilio signature verified successfully")
         
         # Parse webhook payload using integration service
         message_data = twilio_service.parse_webhook_payload(form_dict)
         
-        logger.info(
-            f"Received WhatsApp message from {message_data.get('from_number')}: "
-            f"{message_data.get('body')[:50]}..."
-        )
+        # Log parsed message data
+        logger.info(f"\n📨 Parsed Message Data:")
+        logger.info(json.dumps(message_data, indent=2, ensure_ascii=False))
         
         # Process message asynchronously via Celery
         task = process_whatsapp_message.delay(message_data)
-        logger.info(f"WhatsApp message task queued: {task.id}")
+        logger.info(f"\n✅ WhatsApp message task queued: {task.id}")
+        logger.info(f"📤 From: {message_data.get('from_number')}")
+        logger.info(f"💬 Message: {message_data.get('body')}")
+        logger.info("=" * 80)
         
         # Return immediate response to Twilio (TwiML)
         # You can customize this response based on your bot logic

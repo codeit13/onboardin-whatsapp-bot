@@ -8,7 +8,7 @@ from app.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="app.tasks.whatsapp_tasks.process_whatsapp_message", bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3)
 def process_whatsapp_message(
     self,
     message_data: Dict[str, Any],

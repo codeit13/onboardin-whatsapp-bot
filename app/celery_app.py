@@ -11,7 +11,11 @@ celery_app = Celery(
     "onboarding",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks"],
+    include=[
+        "app.tasks.whatsapp_tasks",
+        "app.tasks.webhook_tasks",
+        "app.tasks.onboarding_tasks",
+    ],
 )
 
 # Celery configuration

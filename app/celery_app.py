@@ -3,6 +3,7 @@ Celery application configuration
 """
 import logging
 from celery import Celery
+from celery.signals import worker_process_init
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ celery_app.conf.task_routes = {
 }
 
 
-@celery_app.signals.worker_process_init.connect
+@worker_process_init.connect
 def init_worker_process(**kwargs):
     """
     Initialize services when Celery worker process starts

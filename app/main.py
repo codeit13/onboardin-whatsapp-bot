@@ -34,6 +34,24 @@ async def lifespan(app: FastAPI):
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
     
+    # Initialize database connection (tables are managed by Alembic migrations)
+    try:
+        from app.core.database import init_database
+        init_database()
+        logger.info("✅ Database connection initialized")
+        logger.info("   Note: Run 'alembic upgrade head' to create/update database tables")
+    except Exception as e:
+        logger.warning(f"⚠️ Database initialization failed: {str(e)}")
+        logger.warning("   Some features may not work without database connection")
+    
+    # Initialize RAG services (embedding model and vector store)
+    try:
+        from app.services.rag.singletons import initialize_rag_services
+        initialize_rag_services()
+    except Exception as e:
+        logger.warning(f"⚠️ RAG services initialization failed: {str(e)}")
+        logger.warning("   RAG features may not work properly")
+    
     yield
     
     # Shutdown

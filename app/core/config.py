@@ -72,10 +72,50 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    SQL_ECHO: bool = False  # Set to True to log all SQL queries (very verbose)
     
     # File Upload
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
     ALLOWED_EXTENSIONS: list[str] = [".pdf", ".jpg", ".jpeg", ".png", ".xlsx"]
+    
+    # RAG Configuration
+    # LLM Settings (dynamic - can be changed via config)
+    LLM_PROVIDER: str = "gemini"  # gemini, groq, openai, anthropic, etc.
+    LLM_API_KEY: Optional[str] = None
+    LLM_MODEL_NAME: Optional[str] = "gemini-2.5-flash-lite"  # Model name (e.g., "gemini-pro", "gpt-4", etc.)
+    LLM_TEMPERATURE: float = 0.7
+    LLM_MAX_TOKENS: int = 2048
+    
+    # Groq Settings (for text enhancement)
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_MODEL_NAME: str = "llama-3.3-70b-versatile"  # Groq model name
+    TEXT_ENHANCEMENT_ENABLED: bool = True  # Enable LLM text enhancement before chunking
+    TEXT_ENHANCEMENT_TEMPERATURE: float = 0.3  # Low temperature to prevent hallucination
+    
+    # Embedding Settings (dynamic - can be changed via config)
+    EMBEDDING_PROVIDER: str = "sentence-transformers"  # sentence-transformers, openai, etc.
+    EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"  # Default sentence-transformers model
+    EMBEDDING_API_KEY: Optional[str] = None  # For API-based embeddings
+    
+    # Vector Store Settings
+    VECTOR_STORE_TYPE: str = "faiss"  # faiss, pinecone, weaviate, etc.
+    VECTOR_STORE_PATH: str = "./data/vector_store"  # Local path for FAISS
+    VECTOR_DIMENSION: int = 384  # Dimension for all-MiniLM-L6-v2, adjust based on model
+    
+    # RAG Settings
+    RAG_CHUNK_SIZE: int = 1000  # Characters per chunk
+    RAG_CHUNK_OVERLAP: int = 200  # Overlap between chunks
+    RAG_TOP_K: int = 5  # Number of relevant chunks to retrieve
+    RAG_SIMILARITY_THRESHOLD: float = 0.3  # Minimum similarity score for retrieval
+    
+    # Document Processing
+    DOCUMENTS_STORAGE_PATH: str = "./data/documents"  # Local filesystem path
+    OCR_ENABLED: bool = True
+    OCR_LANGUAGE: str = "eng"  # Tesseract language code
+    
+    # Conversation/Memory Settings
+    CONVERSATION_HISTORY_LIMIT: int = 10  # Number of previous messages to include in context
+    SESSION_TIMEOUT_HOURS: int = 24  # Session timeout in hours
     
     @field_validator("WORKERS", mode="before")
     @classmethod

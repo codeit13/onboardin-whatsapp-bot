@@ -2,7 +2,7 @@
 API v1 router - aggregates all v1 endpoints
 """
 from fastapi import APIRouter
-from app.api.v1.endpoints import webhooks, whatsapp
+from app.api.v1.endpoints import webhooks, whatsapp, rag
 # from app.api.v1.endpoints import users, onboarding
 
 api_router = APIRouter()
@@ -19,6 +19,13 @@ api_router.include_router(
     whatsapp.router,
     prefix="/whatsapp",
     tags=["whatsapp"],
+)
+
+# Include RAG endpoints
+api_router.include_router(
+    rag.router,
+    prefix="/rag",
+    tags=["rag"],
 )
 
 # Add other endpoint routers as needed

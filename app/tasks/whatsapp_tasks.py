@@ -66,7 +66,7 @@ def _process_message_content(
     message_data: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Process message content and determine response
+    Process message content and determine response using RAG
     
     Args:
         body: Message text
@@ -76,21 +76,52 @@ def _process_message_content(
     Returns:
         Processing result
     """
-    # Use WhatsApp service for business logic
-    from app.services.whatsapp_service import WhatsAppService
-    
-    service = WhatsAppService()
-    result = service.process({
-        "phone_number": phone_number,
-        "message": body,
-    })
-    
-    return {
-        "action": result.get("intent", "unknown"),
-        "response": result.get("response", "I didn't understand that."),
-        "intent": result.get("intent", "unknown"),
-        "session_update": result.get("session_update", {}),
-    }
+    try:
+        # Initialize database session
+        from app.core.database import SessionLocal, init_database
+        from app.services.rag.rag_service import RAGService
+        from app.tables.users import UserRepository
+        
+        # Initialize database if not already done
+        try:
+            init_database()
+        except:
+            pass  # Already initialized
+        
+        db = SessionLocal()
+        try:
+            # Verify user exists, create if not
+            user_repo = UserRepository(db)
+            user = user_repo.get_by_phone(phone_number)
+            if not user:
+                # Create user if doesn't exist
+                logger.info(f"Creating new user for phone number: {phone_number}")
+                user = user_repo.create(phone_number=phone_number)
+            
+            # Use RAG service for intelligent responses
+            rag_service = RAGService(db)
+            rag_result = rag_service.query(
+                user_phone_number=phone_number,
+                query=body,
+            )
+            
+            return {
+                "action": "rag_query",
+                "response": rag_result.get("response", "I didn't understand that."),
+                "intent": "rag_query",
+                "session_id": rag_result.get("session_id"),
+                "sources": rag_result.get("sources", []),
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Error processing message with RAG: {str(e)}", exc_info=True)
+        # Fallback to simple response
+        return {
+            "action": "error",
+            "response": "I'm sorry, I encountered an error processing your message. Please try again.",
+            "intent": "error",
+        }
 
 
 def _handle_message_response(

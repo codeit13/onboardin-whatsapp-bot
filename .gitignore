@@ -63,7 +63,7 @@ htmlcov/
 dist/
 *.tar.gz
 
-data/
-data/**/*
-data/*
-data/**
+# data/
+# data/**/*
+# data/*
+# data/**

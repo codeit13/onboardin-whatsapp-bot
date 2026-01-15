@@ -1,9 +1,11 @@
 """
 Celery application configuration
 """
+import logging
 from celery import Celery
 from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Create Celery app
@@ -39,4 +41,33 @@ celery_app.conf.task_routes = {
     "app.tasks.onboarding_tasks.*": {"queue": "onboarding"},
     # whatsapp_tasks uses default queue (no routing needed)
 }
+
+
+@celery_app.signals.worker_process_init.connect
+def init_worker_process(**kwargs):
+    """
+    Initialize services when Celery worker process starts
+    This ensures database and RAG services are available in the worker
+    """
+    try:
+        logger.info("🔧 Initializing Celery worker process...")
+        
+        # Initialize database
+        from app.core.database import init_database
+        init_database()
+        logger.info("✅ Database initialized in Celery worker")
+        
+        # Initialize RAG services (embedding model and vector store)
+        try:
+            from app.services.rag.singletons import initialize_rag_services
+            initialize_rag_services()
+            logger.info("✅ RAG services initialized in Celery worker")
+        except Exception as e:
+            logger.warning(f"⚠️  RAG services initialization warning: {e}")
+            # Don't fail worker startup - will be initialized on first task if needed
+        
+        logger.info("✅ Celery worker process initialization complete")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Celery worker process: {e}", exc_info=True)
+        # Don't raise - let tasks handle initialization if needed
 

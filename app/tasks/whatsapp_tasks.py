@@ -67,6 +67,7 @@ def _process_message_content(
 ) -> Dict[str, Any]:
     """
     Process message content and determine response using RAG
+    Same pipeline as /api/v1/rag/chat endpoint
     
     Args:
         body: Message text
@@ -82,12 +83,36 @@ def _process_message_content(
         from app.services.rag.rag_service import RAGService
         from app.tables.users import UserRepository
         
-        # Initialize database if not already done
-        try:
-            init_database()
-        except:
-            pass  # Already initialized
+        # Initialize database (required for Celery worker - runs in separate process)
+        logger.info("Initializing database connection...")
+        init_database()
         
+        # Verify SessionLocal is initialized
+        if SessionLocal is None:
+            error_msg = "Database not initialized. Check DATABASE_URL configuration."
+            logger.error(f"❌ {error_msg}")
+            raise RuntimeError(error_msg)
+        
+        logger.info("✅ Database connection initialized in Celery worker")
+        
+        # Initialize RAG services (required for Celery worker - runs in separate process)
+        # These must be initialized before creating RAGService
+        logger.info("Initializing RAG services...")
+        from app.services.rag.singletons import initialize_rag_services
+        try:
+            initialize_rag_services()
+            logger.info("✅ RAG services initialized in Celery worker")
+        except RuntimeError as e:
+            # If services are already initialized, that's fine
+            if "not initialized" not in str(e):
+                logger.warning(f"RAG services initialization warning: {e}")
+                # Try to continue - services might work anyway
+        except Exception as rag_init_error:
+            logger.error(f"❌ Failed to initialize RAG services: {rag_init_error}", exc_info=True)
+            raise RuntimeError(f"RAG services initialization failed: {rag_init_error}") from rag_init_error
+        
+        # Create database session
+        logger.info("Creating database session...")
         db = SessionLocal()
         try:
             # Verify user exists, create if not

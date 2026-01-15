@@ -12,6 +12,7 @@ from app.services.rag.rag_service import RAGService
 from app.tables.knowledge_documents import KnowledgeDocumentRepository, DocumentType, DocumentStatus
 from app.tables.user_documents import UserDocumentRepository
 from app.tables.users import UserRepository
+from app.tables.document_chunks import DocumentChunkRepository
 
 settings = get_settings()
 
@@ -32,6 +33,16 @@ class ChatResponse(BaseModel):
     num_sources: int
 
 
+class ChunkResponse(BaseModel):
+    id: int
+    chunk_index: int
+    chunk_text: str
+    chunk_start: Optional[int]
+    chunk_end: Optional[int]
+    vector_id: Optional[str]
+    created_at: str
+
+
 class DocumentResponse(BaseModel):
     id: int
     title: str
@@ -40,6 +51,7 @@ class DocumentResponse(BaseModel):
     status: str
     created_at: str
     processed_at: Optional[str]
+    chunks: List[ChunkResponse] = []
 
 
 class UserDocumentMappingRequest(BaseModel):
@@ -102,66 +114,101 @@ async def chat(
         )
 
 
-@router.post("/documents", response_model=DocumentResponse, tags=["rag"])
+@router.post("/documents", response_model=List[DocumentResponse], tags=["rag"])
 async def upload_document(
-    file: UploadFile = File(...),
-    title: str = Form(...),
+    files: List[UploadFile] = File(...),
+    title: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     user_phone_number: Optional[str] = Form(None),
     created_by: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     """
-    Upload a document to the knowledge base
+    Upload one or more documents to the knowledge base
     
     Args:
-        file: Document file to upload
-        title: Document title
-        description: Document description
+        files: One or more document files to upload
+        title: Document title (ignored when uploading multiple files, used as fallback for single file if provided)
+        description: Document description (applied to all files)
         user_phone_number: If provided, make this user-specific
         created_by: User who uploaded the document
         db: Database session
         
     Returns:
-        Document information
+        List of document information
     """
     try:
         import os
         from app.core.config import get_settings
         
         settings = get_settings()
-        
-        # Save uploaded file
         os.makedirs(settings.DOCUMENTS_STORAGE_PATH, exist_ok=True)
-        file_path = os.path.join(settings.DOCUMENTS_STORAGE_PATH, file.filename)
         
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+        # Determine if we're handling multiple files
+        is_multiple_files = len(files) > 1
         
-        # Initialize RAG service and add document
+        # If multiple files, ignore title field
+        if is_multiple_files:
+            title = None
+        
+        documents = []
         rag_service = RAGService(db)
-        result = rag_service.add_document(
-            file_path=file_path,
-            title=title,
-            description=description,
-            user_phone_number=user_phone_number,
-            created_by=created_by,
-        )
-        
-        # Get document details
         doc_repo = KnowledgeDocumentRepository(db)
-        doc = doc_repo.get_by_id(result["document_id"])
+        chunk_repo = DocumentChunkRepository(db)
         
-        return DocumentResponse(
-            id=doc.id,
-            title=doc.title,
-            description=doc.description,
-            document_type=doc.document_type.value if doc.document_type else "unknown",
-            status=doc.status.value if doc.status else "unknown",
-            created_at=doc.created_at.isoformat() if doc.created_at else "",
-            processed_at=doc.processed_at.isoformat() if doc.processed_at else None,
-        )
+        for file in files:
+            # Save uploaded file
+            file_path = os.path.join(settings.DOCUMENTS_STORAGE_PATH, file.filename)
+            
+            with open(file_path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+            
+            # Determine title: use filename if title is empty/None, otherwise use provided title
+            # For multiple files, always use filename
+            document_title = file.filename if (is_multiple_files or not title or title.strip() == "") else title
+            
+            # Initialize RAG service and add document
+            result = rag_service.add_document(
+                file_path=file_path,
+                title=document_title,
+                description=description,
+                user_phone_number=user_phone_number,
+                created_by=created_by,
+            )
+            
+            # Get document details
+            doc = doc_repo.get_by_id(result["document_id"])
+            
+            # Get all chunks for this document
+            chunks = chunk_repo.get_by_document(doc.id, user_phone_number=user_phone_number)
+            
+            # Convert chunks to response format
+            chunk_responses = [
+                ChunkResponse(
+                    id=chunk.id,
+                    chunk_index=chunk.chunk_index,
+                    chunk_text=chunk.chunk_text,
+                    chunk_start=chunk.chunk_start,
+                    chunk_end=chunk.chunk_end,
+                    vector_id=chunk.vector_id,
+                    created_at=chunk.created_at.isoformat() if chunk.created_at else "",
+                )
+                for chunk in chunks
+            ]
+            
+            documents.append(DocumentResponse(
+                id=doc.id,
+                title=doc.title,
+                description=doc.description,
+                document_type=doc.document_type.value if doc.document_type else "unknown",
+                status=doc.status.value if doc.status else "unknown",
+                created_at=doc.created_at.isoformat() if doc.created_at else "",
+                processed_at=doc.processed_at.isoformat() if doc.processed_at else None,
+                chunks=chunk_responses,
+            ))
+        
+        return documents
     except Exception as e:
         logger.error(f"Error uploading document: {str(e)}", exc_info=True)
         raise HTTPException(

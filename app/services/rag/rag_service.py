@@ -365,18 +365,21 @@ Note: No relevant context documents were found. Please answer based on your gene
                 
                 logger.info(f"📄 Extracted {len(text)} characters from document")
                 
-                # Enhance text using LLM (if enabled)
-                enhanced_text = self.text_enhancer.enhance_text(
-                    text=text,
-                    document_title=title,
-                    document_type=document_type.value if document_type else None
-                )
-                
-                if enhanced_text != text:
-                    logger.info(f"✨ Text enhanced: {len(text)} → {len(enhanced_text)} characters")
-                    text = enhanced_text
+                # Enhance text using LLM (if enabled) - Skip for PDF files
+                if document_type != DocumentType.PDF:
+                    enhanced_text = self.text_enhancer.enhance_text(
+                        text=text,
+                        document_title=title,
+                        document_type=document_type.value if document_type else None
+                    )
+                    
+                    if enhanced_text != text:
+                        logger.info(f"✨ Text enhanced: {len(text)} → {len(enhanced_text)} characters")
+                        text = enhanced_text
+                    else:
+                        logger.info("ℹ️  Text enhancement skipped or unchanged")
                 else:
-                    logger.info("ℹ️  Text enhancement skipped or unchanged")
+                    logger.info("ℹ️  Text enhancement skipped for PDF files")
                 
                 # Chunk text using LangChain
                 chunks = self.document_processor.chunk_text(text, title=title)

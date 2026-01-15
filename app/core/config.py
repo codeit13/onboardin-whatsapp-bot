@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     CELERY_ACCEPT_CONTENT: list[str] = ["json"]
     CELERY_TIMEZONE: str = "UTC"
     CELERY_ENABLE_UTC: bool = True
+    CELERY_WORKER_CONCURRENCY: int = 4  # Number of worker processes/threads per Celery worker instance
     
     # Webhooks
     WEBHOOK_SECRET: Optional[str] = None

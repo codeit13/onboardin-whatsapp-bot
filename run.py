@@ -68,6 +68,9 @@ def start_celery_worker() -> subprocess.Popen | None:
     
     try:
         print("🔄 Starting Celery worker...")
+        # Get concurrency from settings or environment variable
+        celery_concurrency = os.getenv("CELERY_CONCURRENCY", str(settings.CELERY_WORKER_CONCURRENCY))
+        
         # Use unbuffered output so logs appear immediately
         process = subprocess.Popen(
             [
@@ -79,7 +82,7 @@ def start_celery_worker() -> subprocess.Popen | None:
                 "app.celery_app",
                 "worker",
                 "--loglevel=info",
-                "--concurrency=4",
+                f"--concurrency={celery_concurrency}",
                 "--without-gossip",
                 "--without-mingle",
                 "--without-heartbeat",

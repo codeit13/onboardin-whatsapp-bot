@@ -47,7 +47,7 @@ class RAGService:
         logger.info("✅ Initialized RAGService")
     
     def query(self, user_phone_number: str, query: str,
-             session_id: Optional[str] = None) -> Dict[str, Any]:
+             session_id: Optional[str] = None, user_name: Optional[str] = None) -> Dict[str, Any]:
         """
         Process a user query using RAG
         
@@ -113,6 +113,7 @@ class RAGService:
                 query=query,
                 relevant_chunks=relevant_chunks,
                 conversation_context=conversation_context,
+                user_name=user_name,
             )
             
             # Add assistant response to history
@@ -247,7 +248,8 @@ class RAGService:
             return []
     
     def _generate_response(self, query: str, relevant_chunks: List[Dict[str, Any]],
-                          conversation_context: List[Dict[str, str]]) -> str:
+                          conversation_context: List[Dict[str, str]], 
+                          user_name: Optional[str] = None) -> str:
         """Generate response using LLM with retrieved context"""
         try:
             # Build context from retrieved chunks
@@ -256,8 +258,14 @@ class RAGService:
                 for chunk in relevant_chunks
             ])
             
-            # Build system prompt
-            system_prompt = """You are a helpful assistant that answers questions based on the provided context documents.
+            # Build system prompt with optional user name personalization
+            if user_name:
+                system_prompt = f"""You are a helpful assistant that answers questions based on the provided context documents.
+You are assisting {user_name}. Use only the information from the context to answer questions. 
+If the context doesn't contain enough information, say that you don't have enough information to answer the question.
+Be concise and helpful in your responses, and address {user_name} naturally when appropriate."""
+            else:
+                system_prompt = """You are a helpful assistant that answers questions based on the provided context documents.
 Use only the information from the context to answer questions. If the context doesn't contain enough information,
 say that you don't have enough information to answer the question.
 Be concise and helpful in your responses."""
@@ -356,17 +364,22 @@ Note: No relevant context documents were found. Please answer based on your gene
             
             # Process document asynchronously (for now, we'll do it synchronously)
             try:
-                # Extract text
+                # Extract text (and optionally pre-chunked data from DeepDocDetection)
                 processed = self.document_processor.process_file(file_path)
                 text = processed.get("text", "")
+                pre_chunked = processed.get("chunks")  # Pre-chunked from DeepDocDetection
+                use_deepdoctection = processed.get("use_deepdoctection", False)
                 
                 if not text:
                     raise ValueError("No text extracted from document")
                 
                 logger.info(f"📄 Extracted {len(text)} characters from document")
+                if use_deepdoctection:
+                    logger.info(f"📦 Using layout-aware chunks from DeepDocDetection")
                 
-                # Enhance text using LLM (if enabled) - Skip for PDF files
-                if document_type != DocumentType.PDF:
+                # Enhance text using LLM (if enabled) - Skip for PDF files and DeepDocDetection chunks
+                # DeepDocDetection already provides structured, layout-aware chunks
+                if not use_deepdoctection and document_type != DocumentType.PDF:
                     enhanced_text = self.text_enhancer.enhance_text(
                         text=text,
                         document_title=title,
@@ -379,10 +392,17 @@ Note: No relevant context documents were found. Please answer based on your gene
                     else:
                         logger.info("ℹ️  Text enhancement skipped or unchanged")
                 else:
-                    logger.info("ℹ️  Text enhancement skipped for PDF files")
+                    if use_deepdoctection:
+                        logger.info("ℹ️  Text enhancement skipped for DeepDocDetection (already layout-aware)")
+                    else:
+                        logger.info("ℹ️  Text enhancement skipped for PDF files")
                 
-                # Chunk text using LangChain
-                chunks = self.document_processor.chunk_text(text, title=title)
+                # Chunk text using LangChain, or use pre-chunked data from DeepDocDetection
+                chunks = self.document_processor.chunk_text(
+                    text=text,
+                    title=title,
+                    pre_chunked=pre_chunked
+                )
                 
                 # Generate embeddings and add to vector store
                 chunk_texts = [chunk["text"] for chunk in chunks]

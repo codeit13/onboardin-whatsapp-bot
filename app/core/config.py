@@ -105,13 +105,14 @@ class Settings(BaseSettings):
     # RAG Settings
     RAG_CHUNK_SIZE: int = 1000  # Characters per chunk
     RAG_CHUNK_OVERLAP: int = 200  # Overlap between chunks
-    RAG_TOP_K: int = 5  # Number of relevant chunks to retrieve
-    RAG_SIMILARITY_THRESHOLD: float = 0.3  # Minimum similarity score for retrieval
+    RAG_TOP_K: int = 10  # Number of relevant chunks to retrieve
+    RAG_SIMILARITY_THRESHOLD: float = 0.1  # Minimum similarity score for retrieval
     
     # Document Processing
     DOCUMENTS_STORAGE_PATH: str = "./data/documents"  # Local filesystem path
     OCR_ENABLED: bool = True
     OCR_LANGUAGE: str = "eng"  # Tesseract language code
+    USE_DEEPDOCTECTION: bool = False  # Use DeepDocDetection for layout-aware PDF/image parsing
     
     # Conversation/Memory Settings
     CONVERSATION_HISTORY_LIMIT: int = 10  # Number of previous messages to include in context

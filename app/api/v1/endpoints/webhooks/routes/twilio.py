@@ -88,13 +88,19 @@ async def twilio_whatsapp_webhook(
         logger.info(f"💬 Message: {message_data.get('body')}")
         logger.info("=" * 80)
         
-        # Return immediate acknowledgment message
-        # The intelligent response will be sent by the Celery task
-        # This gives user immediate feedback while processing happens in background
-        response_message = "Message received! We'll get back to you shortly."
-        twiml_response = twilio_service.create_twiml_response(response_message)
+        # Return empty TwiML response (no immediate message)
+        # The intelligent response will be sent asynchronously by the Celery task
+        # This allows the task to send a properly processed response
+        try:
+            from twilio.twiml.messaging_response import MessagingResponse
+            response = MessagingResponse()
+            # Don't add any message - let Celery task handle it
+            empty_twiml = str(response)
+        except ImportError:
+            # Fallback if Twilio SDK not available
+            empty_twiml = "<?xml version='1.0' encoding='UTF-8'?><Response></Response>"
         
-        return Response(content=twiml_response, media_type="application/xml")
+        return Response(content=empty_twiml, media_type="application/xml")
         
     except Exception as e:
         logger.error(f"Error processing Twilio webhook: {str(e)}", exc_info=True)

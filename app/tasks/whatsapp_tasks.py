@@ -98,11 +98,17 @@ def _process_message_content(
                 logger.info(f"Creating new user for phone number: {phone_number}")
                 user = user_repo.create(phone_number=phone_number)
             
-            # Use RAG service for intelligent responses
+            # Get user's name if available
+            user_name = user.name if user and user.name else None
+            if user_name:
+                logger.info(f"User name found: {user_name}")
+            
+            # Use RAG service for intelligent responses (same pipeline as /api/v1/rag/chat endpoint)
             rag_service = RAGService(db)
             rag_result = rag_service.query(
                 user_phone_number=phone_number,
                 query=body,
+                user_name=user_name,  # Pass user name for personalized responses
             )
             
             return {

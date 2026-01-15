@@ -1,8 +1,8 @@
 # IMPORTANT: To prevent heavy NVIDIA CUDA/CuDNN packages from being installed:
 #
 # Recommended approach (ensures CPU-only PyTorch):
-#   1. pip install torch --index-url https://download.pytorch.org/whl/cpu
-#   2. pip install -r requirements.txt
+#   1. pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision
+#   2. pip install --no-cache-dir -r requirements.txt
 #
 # Alternative: The --extra-index-url below will make pip prefer CPU PyTorch wheels,
 # but installing torch separately first is more reliable.
@@ -48,8 +48,10 @@ groq>=0.4.0  # Groq API for text enhancement
 
 # PyTorch CPU-only (must be installed before sentence-transformers to avoid CUDA dependencies)
 # Install from CPU-only wheel to prevent CUDA packages
+# Note: Install both torch and torchvision together from CPU index for compatibility
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch>=2.0.0,<3.0.0
+torchvision>=0.15.0,<1.0.0  # Required by timm and Deepdoctection, must match torch version
 
 # Embeddings (will use CPU torch from above)
 sentence-transformers>=2.2.0
@@ -73,4 +75,14 @@ langchain-community>=0.0.20
 # OCR
 pytesseract>=0.3.10
 Pillow>=10.0.0
+
+# Deepdoctection dependencies
+# Note: Install torch and torchvision CPU-only first: 
+#       pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision
+# Then install these Deepdoctection packages
+opencv-python-headless>=4.8.0  # OpenCV for Deepdoctection (headless version to save space, no GUI dependencies)
+timm>=0.9.16  # PyTorch Image Models for Deepdoctection
+transformers>=4.48.0  # HuggingFace Transformers for Deepdoctection
+python-doctr>=1.0.0  # Document Text Recognition (docTR) for OCR
+deepdoctection>=1.0.0  # Document AI server/inference core package
 

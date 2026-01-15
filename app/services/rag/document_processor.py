@@ -20,7 +20,25 @@ class DocumentProcessor:
         self.ocr_enabled = settings.OCR_ENABLED
         self.ocr_language = settings.OCR_LANGUAGE
         self.text_enhancer = text_enhancer  # Optional TextEnhancer for LLM-based text improvement
-        logger.info(f"Initialized DocumentProcessor (OCR: {self.ocr_enabled})")
+        self.use_deepdoctection = settings.USE_DEEPDOCTECTION
+        self._deepdoctection_parser = None
+        
+        if self.use_deepdoctection:
+            try:
+                from app.services.rag.deepdoctection_parser import DeepDocDetectionParser
+                self._deepdoctection_parser = DeepDocDetectionParser(
+                    doc_lang="en",
+                    max_chunk_length=200  # Can be made configurable if needed
+                )
+                logger.info("DeepDocDetection parser initialized")
+            except ImportError as e:
+                logger.warning(f"DeepDocDetection requested but not available: {e}. Falling back to default processors.")
+                self.use_deepdoctection = False
+        
+        logger.info(
+            f"Initialized DocumentProcessor "
+            f"(OCR: {self.ocr_enabled}, DeepDocDetection: {self.use_deepdoctection})"
+        )
     
     def process_file(self, file_path: str, mime_type: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -31,7 +49,7 @@ class DocumentProcessor:
             mime_type: MIME type of the file (optional)
             
         Returns:
-            Dictionary with extracted text and metadata
+            Dictionary with extracted text, metadata, and optionally pre-chunked data
         """
         try:
             if not os.path.exists(file_path):
@@ -42,7 +60,29 @@ class DocumentProcessor:
             
             logger.info(f"Processing file: {file_path} (type: {mime_type})")
             
-            # Route to appropriate processor
+            # If using DeepDocDetection for PDFs or images, get chunks directly
+            if self.use_deepdoctection and self._deepdoctection_parser:
+                if file_ext == ".pdf" or file_ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff"]:
+                    try:
+                        result = self._deepdoctection_parser.parse_file(file_path)
+                        # Return with pre-chunked data
+                        return {
+                            "text": result["text"],
+                            "chunks": result["chunks"],  # Pre-chunked layout-aware chunks
+                            "file_path": file_path,
+                            "mime_type": mime_type,
+                            "file_ext": file_ext,
+                            "doc_id": result.get("doc_id"),
+                            "use_deepdoctection": True,
+                        }
+                    except Exception as e:
+                        logger.warning(
+                            f"DeepDocDetection processing failed: {str(e)}. "
+                            "Falling back to default processor."
+                        )
+                        # Fall through to default processors
+            
+            # Route to appropriate processor (default flow)
             if file_ext == ".pdf":
                 text = self._process_pdf(file_path)
             elif file_ext in [".docx", ".doc"]:
@@ -68,6 +108,7 @@ class DocumentProcessor:
                 "file_path": file_path,
                 "mime_type": mime_type,
                 "file_ext": file_ext,
+                "use_deepdoctection": False,
             }
         except Exception as e:
             logger.error(f"Error processing file {file_path}: {str(e)}")
@@ -75,19 +116,33 @@ class DocumentProcessor:
     
     def chunk_text(self, text: str, chunk_size: Optional[int] = None,
                   chunk_overlap: Optional[int] = None,
-                  title: Optional[str] = None) -> List[Dict[str, Any]]:
+                  title: Optional[str] = None,
+                  pre_chunked: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """
-        Split text into chunks using LangChain's RecursiveCharacterTextSplitter.
+        Split text into chunks using LangChain's RecursiveCharacterTextSplitter,
+        or use pre-chunked data if provided (e.g., from DeepDocDetection).
         
         Args:
-            text: Text to chunk
+            text: Text to chunk (ignored if pre_chunked is provided)
             chunk_size: Size of each chunk (characters)
             chunk_overlap: Overlap between chunks (characters)
             title: Document title to add as context to chunks
+            pre_chunked: Pre-chunked data from DeepDocDetection (optional)
             
         Returns:
             List of chunk dictionaries with text and metadata
         """
+        # If pre-chunked data is available (from DeepDocDetection), use it directly
+        if pre_chunked:
+            logger.info(f"📦 Using {len(pre_chunked)} pre-chunked layout-aware chunks from DeepDocDetection")
+            # Add title context if provided
+            if title:
+                for chunk in pre_chunked:
+                    if "text" in chunk:
+                        chunk["text"] = f"Document: {title}\n\n{chunk['text']}"
+            return pre_chunked
+        
+        # Default chunking using LangChain
         chunk_size = chunk_size or settings.RAG_CHUNK_SIZE
         chunk_overlap = chunk_overlap or settings.RAG_CHUNK_OVERLAP
         
@@ -144,7 +199,21 @@ class DocumentProcessor:
         }
     
     def _process_pdf(self, file_path: str) -> str:
-        """Process PDF file using LangChain PyPDFLoader"""
+        """Process PDF file using DeepDocDetection (if enabled) or LangChain PyPDFLoader"""
+        # Use DeepDocDetection if enabled
+        if self.use_deepdoctection and self._deepdoctection_parser:
+            try:
+                logger.info(f"Processing PDF with DeepDocDetection: {file_path}")
+                result = self._deepdoctection_parser.parse_file(file_path)
+                return result["text"]
+            except Exception as e:
+                logger.warning(
+                    f"DeepDocDetection PDF processing failed: {str(e)}. "
+                    "Falling back to default PDF processor."
+                )
+                # Fall through to default processor
+        
+        # Default PDF processing using LangChain PyPDFLoader
         try:
             from langchain_community.document_loaders import PyPDFLoader
         except ImportError as e:
@@ -282,7 +351,21 @@ class DocumentProcessor:
             raise
     
     def _process_image(self, file_path: str) -> str:
-        """Process image file with OCR"""
+        """Process image file with DeepDocDetection (if enabled) or OCR"""
+        # Use DeepDocDetection if enabled
+        if self.use_deepdoctection and self._deepdoctection_parser:
+            try:
+                logger.info(f"Processing image with DeepDocDetection: {file_path}")
+                result = self._deepdoctection_parser.parse_file(file_path)
+                return result["text"]
+            except Exception as e:
+                logger.warning(
+                    f"DeepDocDetection image processing failed: {str(e)}. "
+                    "Falling back to OCR."
+                )
+                # Fall through to OCR
+        
+        # Default image processing with OCR
         if not self.ocr_enabled:
             logger.warning("OCR is disabled. Cannot process image.")
             return ""

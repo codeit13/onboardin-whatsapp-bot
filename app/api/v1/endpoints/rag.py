@@ -91,11 +91,15 @@ async def chat(
         # Initialize RAG service
         rag_service = RAGService(db)
         
+        # Get user's name if available for personalized responses
+        user_name = user.name if user.name else None
+        
         # Process query
         result = rag_service.query(
             user_phone_number=phone_number,
             query=request.query,
             session_id=request.session_id,
+            user_name=user_name,
         )
         
         return ChatResponse(

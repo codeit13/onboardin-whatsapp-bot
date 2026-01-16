@@ -7,9 +7,12 @@ from fastapi import APIRouter, Request, HTTPException, status, Header
 from fastapi.responses import Response
 
 from app.core.config import get_settings
+from app.core.database import SessionLocal, init_database
 from app.services.integrations.twilio_service import TwilioIntegrationService
 from app.services.whatsapp_service import WhatsAppService
-from app.tasks.whatsapp_tasks import process_whatsapp_message
+# from app.tasks.whatsapp_tasks import process_whatsapp_message  # Commented out - using direct RAG call for now
+from app.services.rag.rag_service import RAGService
+from app.tables.users import UserRepository
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -80,21 +83,81 @@ async def twilio_whatsapp_webhook(
                     f"This is optional and won't affect message processing."
                 )
         
-        # Process message asynchronously via Celery
-        # The intelligent response will be sent by the Celery task
-        task = process_whatsapp_message.delay(message_data)
-        logger.info(f"\n✅ WhatsApp message task queued: {task.id}")
-        logger.info(f"📤 From: {message_data.get('from_number')}")
-        logger.info(f"💬 Message: {message_data.get('body')}")
-        logger.info("=" * 80)
+        # Process message directly using RAG pipeline (same as /api/v1/rag/chat endpoint)
+        # TODO: Re-enable Celery task for async processing later
+        # task = process_whatsapp_message.delay(message_data)
         
-        # Return empty TwiML response (no immediate message)
-        # The intelligent response will be sent asynchronously by the Celery task
-        # This allows the task to send a properly processed response
+        from_number = message_data.get("from_number", "unknown")
+        body = message_data.get("body", "")
+        
+        # Extract phone number (remove whatsapp: prefix)
+        phone_number = from_number.replace("whatsapp:", "") if from_number.startswith("whatsapp:") else from_number
+        
+        logger.info(f"\n📝 Processing message directly with RAG pipeline...")
+        logger.info(f"📤 From: {from_number}")
+        logger.info(f"💬 Message: {body}")
+        
+        # Get database session (ensure database is initialized)
+        init_database()
+        if SessionLocal is None:
+            raise RuntimeError("Database not initialized. Check DATABASE_URL configuration.")
+        
+        db = SessionLocal()
+        try:
+            # Get or create user
+            user_repo = UserRepository(db)
+            user = user_repo.get_by_phone(phone_number)
+            if not user:
+                logger.info(f"Creating new user for phone number: {phone_number}")
+                user = user_repo.create(phone_number=phone_number)
+            
+            # Get user's name if available
+            user_name = user.name if user and user.name else None
+            if user_name:
+                logger.info(f"User name found: {user_name}")
+            
+            # Use RAG service for intelligent responses (same pipeline as /api/v1/rag/chat endpoint)
+            rag_service = RAGService(db)
+            rag_result = rag_service.query(
+                user_phone_number=phone_number,
+                query=body,
+                user_name=user_name,  # Pass user name for personalized responses
+            )
+            
+            response_text = rag_result.get("response", "I didn't understand that.")
+            logger.info(f"✅ Generated response: {response_text[:100]}")
+            
+            # Send response directly via Twilio
+            whatsapp_number = from_number if from_number.startswith("whatsapp:") else f"whatsapp:{phone_number}"
+            logger.info(f"📤 Sending response to {whatsapp_number}...")
+            
+            send_result = twilio_service.send_message(
+                to=whatsapp_number,
+                message=response_text,
+            )
+            
+            logger.info(f"✅ Response sent successfully: {send_result.get('message_sid')}")
+            logger.info("=" * 80)
+            
+        except Exception as e:
+            logger.error(f"❌ Error processing message with RAG: {str(e)}", exc_info=True)
+            # Send error message to user
+            try:
+                whatsapp_number = from_number if from_number.startswith("whatsapp:") else f"whatsapp:{phone_number}"
+                twilio_service.send_message(
+                    to=whatsapp_number,
+                    message="I'm sorry, I encountered an error processing your message. Please try again.",
+                )
+            except:
+                pass  # Ignore errors in error handling
+        finally:
+            db.close()
+        
+        # Return empty TwiML response (message already sent directly via Twilio API)
         try:
             from twilio.twiml.messaging_response import MessagingResponse
             response = MessagingResponse()
-            # Don't add any message - let Celery task handle it
+            # Don't add any message - already sent directly
             empty_twiml = str(response)
         except ImportError:
             # Fallback if Twilio SDK not available

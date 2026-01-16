@@ -290,13 +290,44 @@ Note: No relevant context documents were found. Please answer based on your gene
             
             messages.append({"role": "user", "content": user_prompt})
             
-            # Generate response
-            if len(messages) > 1:
-                response = self.llm_service.generate_with_context(messages)
-            else:
-                response = self.llm_service.generate(user_prompt, system_prompt=system_prompt)
+            # Try primary LLM service (typically Gemini)
+            try:
+                if len(messages) > 1:
+                    response = self.llm_service.generate_with_context(messages)
+                else:
+                    response = self.llm_service.generate(user_prompt, system_prompt=system_prompt)
+                
+                return response
+            except Exception as primary_error:
+                logger.warning(f"Primary LLM service ({settings.LLM_PROVIDER}) failed: {str(primary_error)}")
+                
+                # Fallback to Groq if primary provider is Gemini
+                if settings.LLM_PROVIDER.lower() == "gemini" and settings.GROQ_API_KEY:
+                    try:
+                        logger.info("🔄 Retrying with Groq as fallback...")
+                        
+                        # Create Groq LLM service for fallback
+                        groq_service = get_llm_service(
+                            provider="groq",
+                            api_key=settings.GROQ_API_KEY,
+                            model_name=settings.GROQ_MODEL_NAME
+                        )
+                        
+                        # Generate response with Groq
+                        if len(messages) > 1:
+                            response = groq_service.generate_with_context(messages)
+                        else:
+                            response = groq_service.generate(user_prompt, system_prompt=system_prompt)
+                        
+                        logger.info("✅ Successfully generated response using Groq fallback")
+                        return response
+                    except Exception as groq_error:
+                        logger.error(f"Groq fallback also failed: {str(groq_error)}")
+                        raise primary_error  # Raise original error
+                else:
+                    # No fallback available, raise original error
+                    raise primary_error
             
-            return response
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}")
             return "I apologize, but I encountered an error while processing your question. Please try again."

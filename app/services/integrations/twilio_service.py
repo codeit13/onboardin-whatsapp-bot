@@ -1,12 +1,16 @@
 """
 Twilio integration service - handles Twilio-specific adapter logic
 """
+import re
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Twilio WhatsApp message character limit (for concatenated messages)
+TWILIO_MESSAGE_LIMIT = 1600
 
 
 class TwilioIntegrationService:
@@ -219,6 +223,81 @@ class TwilioIntegrationService:
                 "reason": f"Error: {str(e)}",
             }
     
+    def _split_message_at_sentences(self, message: str, max_length: int = TWILIO_MESSAGE_LIMIT) -> List[str]:
+        """
+        Split a message at sentence boundaries while respecting the character limit.
+        
+        Splits at the last complete sentence that fits within the limit.
+        If a single sentence exceeds the limit, it will be truncated (shouldn't happen in practice).
+        
+        Args:
+            message: The message text to split
+            max_length: Maximum length per message chunk (default: 1600 for Twilio)
+            
+        Returns:
+            List of message chunks, each fitting within the limit and ending at sentence boundaries
+        """
+        if len(message) <= max_length:
+            return [message]
+        
+        chunks = []
+        # Pattern to match sentence endings: . ! or ? followed by space or end of string
+        # This handles common sentence endings while being flexible
+        sentence_end_pattern = re.compile(r'([.!?]+)\s+')
+        
+        remaining = message
+        while len(remaining) > max_length:
+            # Find all potential sentence boundaries
+            matches = list(sentence_end_pattern.finditer(remaining))
+            
+            if not matches:
+                # No sentence endings found - split at word boundary or hard limit
+                logger.warning(f"No sentence boundaries found in remaining text, splitting at word boundary")
+                # Try to split at last space before limit
+                last_space = remaining.rfind(' ', 0, max_length)
+                if last_space > max_length * 0.5:  # Only use if we can preserve at least 50% of limit
+                    chunk = remaining[:last_space].strip()
+                    remaining = remaining[last_space:].strip()
+                else:
+                    # Hard split (shouldn't happen often)
+                    chunk = remaining[:max_length].strip()
+                    remaining = remaining[max_length:].strip()
+                chunks.append(chunk)
+                continue
+            
+            # Find the last sentence ending that fits within the limit
+            last_valid_match = None
+            for match in matches:
+                # Check if this sentence ending is before the limit
+                if match.end() <= max_length:
+                    last_valid_match = match
+                else:
+                    break
+            
+            if last_valid_match:
+                # Split at the last valid sentence boundary
+                chunk_end = last_valid_match.end()
+                chunk = remaining[:chunk_end].strip()
+                remaining = remaining[chunk_end:].strip()
+                chunks.append(chunk)
+            else:
+                # First sentence is too long - split at word boundary
+                logger.warning(f"First sentence exceeds limit, splitting at word boundary")
+                last_space = remaining.rfind(' ', 0, max_length)
+                if last_space > max_length * 0.5:
+                    chunk = remaining[:last_space].strip()
+                    remaining = remaining[last_space:].strip()
+                else:
+                    chunk = remaining[:max_length].strip()
+                    remaining = remaining[max_length:].strip()
+                chunks.append(chunk)
+        
+        # Add remaining text as final chunk
+        if remaining.strip():
+            chunks.append(remaining.strip())
+        
+        return chunks
+    
     def send_message(
         self,
         to: str,
@@ -228,13 +307,16 @@ class TwilioIntegrationService:
         """
         Send WhatsApp message via Twilio API
         
+        Automatically splits long messages at sentence boundaries to respect
+        Twilio's 1600 character limit for concatenated messages.
+        
         Args:
             to: Recipient WhatsApp number (format: whatsapp:+1234567890)
-            message: Message text to send
-            media_url: Optional media URL to send with message
+            message: Message text to send (will be split if too long)
+            media_url: Optional media URL to send with message (only sent with first chunk)
             
         Returns:
-            Message sending result
+            Message sending result with list of all message SIDs if split
         """
         try:
             from twilio.rest import Client
@@ -247,26 +329,54 @@ class TwilioIntegrationService:
             
             client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
             
-            if media_url:
-                message_obj = client.messages.create(
-                    body=message,
-                    media_url=[media_url],
-                    from_=settings.TWILIO_WHATSAPP_NUMBER,
-                    to=to,
-                )
-            else:
-                message_obj = client.messages.create(
-                    body=message,
-                    from_=settings.TWILIO_WHATSAPP_NUMBER,
-                    to=to,
-                )
+            # Split message if it exceeds the limit
+            message_chunks = self._split_message_at_sentences(message)
             
-            return {
+            if len(message_chunks) > 1:
+                logger.info(f"Message exceeds {TWILIO_MESSAGE_LIMIT} characters, splitting into {len(message_chunks)} chunks")
+            
+            message_sids = []
+            first_chunk = True
+            
+            for i, chunk in enumerate(message_chunks, 1):
+                # Only send media_url with the first chunk
+                chunk_media_url = media_url if first_chunk and media_url else None
+                
+                if len(message_chunks) > 1:
+                    logger.debug(f"Sending chunk {i}/{len(message_chunks)} ({len(chunk)} characters)")
+                
+                if chunk_media_url:
+                    message_obj = client.messages.create(
+                        body=chunk,
+                        media_url=[chunk_media_url],
+                        from_=settings.TWILIO_WHATSAPP_NUMBER,
+                        to=to,
+                    )
+                else:
+                    message_obj = client.messages.create(
+                        body=chunk,
+                        from_=settings.TWILIO_WHATSAPP_NUMBER,
+                        to=to,
+                    )
+                
+                message_sids.append(message_obj.sid)
+                first_chunk = False
+            
+            # Return result with all message SIDs
+            result = {
                 "success": True,
-                "message_sid": message_obj.sid,
-                "status": message_obj.status,
+                "message_sid": message_sids[0],  # Primary message SID (for backward compatibility)
+                "message_sids": message_sids,    # All message SIDs if split
+                "status": "sent",
                 "to": to,
+                "chunks": len(message_chunks),
             }
+            
+            if len(message_chunks) > 1:
+                result["split"] = True
+                logger.info(f"✅ Sent {len(message_chunks)} message chunks successfully")
+            
+            return result
         except ImportError:
             raise ValueError("Twilio SDK not installed")
         except Exception as e:

@@ -136,7 +136,11 @@ async def twilio_whatsapp_webhook(
                 message=response_text,
             )
             
-            logger.info(f"✅ Response sent successfully: {send_result.get('message_sid')}")
+            if send_result.get('split'):
+                logger.info(f"✅ Response sent successfully in {send_result.get('chunks', 1)} chunks: {send_result.get('message_sid')}")
+                logger.info(f"   All message SIDs: {', '.join(send_result.get('message_sids', []))}")
+            else:
+                logger.info(f"✅ Response sent successfully: {send_result.get('message_sid')}")
             logger.info("=" * 80)
             
         except Exception as e:

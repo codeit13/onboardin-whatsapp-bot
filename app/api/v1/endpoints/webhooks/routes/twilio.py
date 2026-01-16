@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, HTTPException, status, Header
 from fastapi.responses import Response
 
 from app.core.config import get_settings
-from app.core.database import SessionLocal, init_database
+from app.core import database  # Import module to access SessionLocal after init
 from app.services.integrations.twilio_service import TwilioIntegrationService
 from app.services.whatsapp_service import WhatsAppService
 # from app.tasks.whatsapp_tasks import process_whatsapp_message  # Commented out - using direct RAG call for now
@@ -98,11 +98,11 @@ async def twilio_whatsapp_webhook(
         logger.info(f"💬 Message: {body}")
         
         # Get database session (ensure database is initialized)
-        init_database()
-        if SessionLocal is None:
+        database.init_database()
+        if database.SessionLocal is None:
             raise RuntimeError("Database not initialized. Check DATABASE_URL configuration.")
         
-        db = SessionLocal()
+        db = database.SessionLocal()
         try:
             # Get or create user
             user_repo = UserRepository(db)

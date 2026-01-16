@@ -61,7 +61,13 @@ def start_celery_worker() -> subprocess.Popen | None:
     Returns:
         Celery worker process or None if not started
     """
-    start_celery = os.getenv("START_CELERY", "true").lower() == "true"
+    settings = get_settings()
+    # Check both environment variable and settings (settings loads from .env automatically)
+    start_celery_env = os.getenv("START_CELERY")
+    if start_celery_env is not None:
+        start_celery = start_celery_env.lower() == "true"
+    else:
+        start_celery = settings.START_CELERY
     
     if not start_celery:
         return None
@@ -129,8 +135,12 @@ if __name__ == "__main__":
     workers = get_worker_count()
     cpu_count = multiprocessing.cpu_count()
     
-    # Check if Celery should be started
-    start_celery = os.getenv("START_CELERY", "true").lower() == "true"
+    # Check if Celery should be started (prefer .env/settings, fallback to env var)
+    start_celery_env = os.getenv("START_CELERY")
+    if start_celery_env is not None:
+        start_celery = start_celery_env.lower() == "true"
+    else:
+        start_celery = settings.START_CELERY
     
     print("=" * 60)
     print("🚀 Starting Onboarding FastAPI Server")

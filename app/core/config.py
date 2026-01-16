@@ -4,12 +4,19 @@ Application configuration management
 import os
 from typing import Optional
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",  # Ignore extra fields from .env
+    )
     
     # Application
     APP_NAME: str = "Onboarding API"
@@ -131,12 +138,6 @@ class Settings(BaseSettings):
             except ValueError:
                 return None
         return v
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-        extra = "ignore"  # Ignore extra fields from .env
 
 
 @lru_cache()

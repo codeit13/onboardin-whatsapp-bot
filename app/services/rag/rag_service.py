@@ -211,10 +211,15 @@ class RAGService:
                     # Global document (user_phone_number is NULL) - accessible to everyone
                     logger.info(f"   │  ✅ PASSED user access (global document)")
                 
-                # Add to relevant chunks
+                # Get document information for context
+                doc = self.knowledge_doc_repo.get_by_id(chunk.document_id)
+                doc_title = doc.title if doc else f"Document {chunk.document_id}"
+                
+                # Add to relevant chunks with document title
                 chunk_info = {
                     "chunk_id": chunk.id,
                     "document_id": chunk.document_id,
+                    "document_title": doc_title,
                     "text": chunk.chunk_text,
                     "similarity": similarity,
                     "metadata": metadata,
@@ -250,83 +255,68 @@ class RAGService:
     def _generate_response(self, query: str, relevant_chunks: List[Dict[str, Any]],
                           conversation_context: List[Dict[str, str]], 
                           user_name: Optional[str] = None) -> str:
-        """Generate response using LLM with retrieved context"""
+        """
+        Generate response using LLM with retrieved context.
+        Uses production-standard RAG prompt format with numbered citations for fact-grounded responses.
+        """
         try:
-            # Build context from retrieved chunks
-            context_text = "\n\n".join([
-                f"[Document {chunk['document_id']}]\n{chunk['text']}"
-                for chunk in relevant_chunks
-            ])
+            # Build structured context with numbered items and source information
+            # This format follows production RAG best practices for better citation tracking
+            context_items = []
+            for idx, chunk in enumerate(relevant_chunks, start=1):
+                doc_title = chunk.get('document_title', f"Document {chunk.get('document_id', 'Unknown')}")
+                chunk_text = chunk.get('text', '')
+                context_items.append(f"[{idx}] Source: {doc_title} (Document ID: {chunk.get('document_id', 'Unknown')})\n{chunk_text}")
             
-            # Build system prompt with optional user name personalization
+            context_text = "\n\n".join(context_items)
+            
+            # Friendly, end-user system prompt (e.g. for WhatsApp / chat)
+            # No technical jargon; when answer is missing, one short helpful line
             if user_name:
-                system_prompt = f"""You are a helpful assistant that answers questions based on the provided context documents.
-You are assisting {user_name}. Use only the information from the context to answer questions. 
-If the context doesn't contain enough information, say that you don't have enough information to answer the question.
-Be concise and helpful in your responses, and address {user_name} naturally when appropriate."""
+                system_prompt = f"""You are a friendly HR and onboarding assistant for employees. You are chatting with {user_name}.
+
+RULES:
+1. Answer ONLY using the information from the context provided below. Do not invent or assume facts.
+2. Write in a warm, clear, and conversational way—as if texting a colleague. Be brief.
+3. When the context clearly contains the answer: reply in plain language. You may say things like "According to the policy..." or "The FAQ says..." but do not mention "context items", "[1]", "[2]", document IDs, or internal labels to the user.
+4. When the context does NOT contain the answer: give one short, friendly sentence. Say you don't have that information and suggest who can help (e.g. "For that, please check with your manager or HR."). Do NOT list what the context contains, do NOT mention "context items", "[1]", "[2]", or document IDs.
+5. Never expose internal structure (numbered context items, document IDs, or "the context discusses...") in your reply. The user should only see a natural, helpful message."""
             else:
-                system_prompt = """You are a helpful assistant that answers questions based on the provided context documents.
-Use only the information from the context to answer questions. If the context doesn't contain enough information,
-say that you don't have enough information to answer the question.
-Be concise and helpful in your responses."""
+                system_prompt = """You are a friendly HR and onboarding assistant for employees.
+
+RULES:
+1. Answer ONLY using the information from the context provided below. Do not invent or assume facts.
+2. Write in a warm, clear, and conversational way—as if texting a colleague. Be brief.
+3. When the context clearly contains the answer: reply in plain language. You may say "According to the policy..." or "The FAQ says..." but do not mention "context items", "[1]", "[2]", document IDs, or internal labels to the user.
+4. When the context does NOT contain the answer: give one short, friendly sentence. Say you don't have that information and suggest who can help (e.g. "For that, please check with your manager or HR."). Do NOT list what the context contains, do NOT mention "context items", "[1]", "[2]", or document IDs.
+5. Never expose internal structure (numbered context items, document IDs, or "the context discusses...") in your reply. The user should only see a natural, helpful message."""
             
-            # Build user prompt with context
+            # User prompt: query + context (numbered for model use only; model must not echo these to user)
             if context_text:
-                user_prompt = f"""Context documents:
+                user_prompt = f"""Query: {query}
+
+Context (use only to ground your answer; do not repeat or cite these labels to the user):
 {context_text}
 
-Question: {query}
-
-Please answer the question based on the context provided above."""
+Reply in a short, user-friendly way. If the answer is not in the context above, say so in one sentence and suggest who to contact (e.g. manager or HR). Do not mention "context items", "[1]", "[2]", or document IDs in your reply."""
             else:
-                user_prompt = f"""Question: {query}
+                user_prompt = f"""Query: {query}
 
-Note: No relevant context documents were found. Please answer based on your general knowledge, but mention that you don't have specific documents to reference."""
+No relevant context was found for this query.
+
+Reply in one short, friendly sentence: you don't have that information and suggest the user check with their manager or HR. Do not mention context, documents, or internal labels."""
             
-            # Prepare messages for LLM
+            # Prepare messages for LLM (Groq: system role + conversation history + user prompt)
             messages = []
             if conversation_context:
-                messages.extend(conversation_context[:-1])  # All but last (current query)
-            
+                for msg in conversation_context[:-1]:
+                    messages.append(msg)
+            if not conversation_context:
+                messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": user_prompt})
-            
-            # Try primary LLM service (typically Gemini)
-            try:
-                if len(messages) > 1:
-                    response = self.llm_service.generate_with_context(messages)
-                else:
-                    response = self.llm_service.generate(user_prompt, system_prompt=system_prompt)
-                
-                return response
-            except Exception as primary_error:
-                logger.warning(f"Primary LLM service ({settings.LLM_PROVIDER}) failed: {str(primary_error)}")
-                
-                # Fallback to Groq if primary provider is Gemini
-                if settings.LLM_PROVIDER.lower() == "gemini" and settings.GROQ_API_KEY:
-                    try:
-                        logger.info("🔄 Retrying with Groq as fallback...")
-                        
-                        # Create Groq LLM service for fallback
-                        groq_service = get_llm_service(
-                            provider="groq",
-                            api_key=settings.GROQ_API_KEY,
-                            model_name=settings.GROQ_MODEL_NAME
-                        )
-                        
-                        # Generate response with Groq
-                        if len(messages) > 1:
-                            response = groq_service.generate_with_context(messages)
-                        else:
-                            response = groq_service.generate(user_prompt, system_prompt=system_prompt)
-                        
-                        logger.info("✅ Successfully generated response using Groq fallback")
-                        return response
-                    except Exception as groq_error:
-                        logger.error(f"Groq fallback also failed: {str(groq_error)}")
-                        raise primary_error  # Raise original error
-                else:
-                    # No fallback available, raise original error
-                    raise primary_error
+
+            response = self.llm_service.generate_with_context(messages)
+            return response
             
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}")
@@ -408,9 +398,8 @@ Note: No relevant context documents were found. Please answer based on your gene
                 if use_deepdoctection:
                     logger.info(f"📦 Using layout-aware chunks from DeepDocDetection")
                 
-                # Enhance text using LLM (if enabled) - Skip for PDF files and DeepDocDetection chunks
-                # DeepDocDetection already provides structured, layout-aware chunks
-                if not use_deepdoctection and document_type != DocumentType.PDF:
+                # Enhance text using LLM (if enabled) - Skip for PDF, DeepDocDetection, and pre-chunked (e.g. FAQ .md)
+                if not use_deepdoctection and document_type != DocumentType.PDF and not pre_chunked:
                     enhanced_text = self.text_enhancer.enhance_text(
                         text=text,
                         document_title=title,

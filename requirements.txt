@@ -42,9 +42,8 @@ python-dotenv>=1.0.0
 structlog>=23.2.0
 
 # RAG Dependencies
-# LLM
-google-generativeai>=0.3.0  # Gemini API
-groq>=0.4.0  # Groq API for text enhancement
+# LLM (Groq only)
+groq>=0.4.0
 
 # PyTorch CPU-only (must be installed before sentence-transformers to avoid CUDA dependencies)
 # Install from CPU-only wheel to prevent CUDA packages

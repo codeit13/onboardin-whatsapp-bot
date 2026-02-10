@@ -91,6 +91,29 @@ class DocumentProcessor:
                 text = self._process_txt(file_path)
             elif file_ext in [".md", ".markdown"]:
                 text = self._process_markdown(file_path)
+                # FAQ-style Markdown: pre-chunk by --- so enhancement won't strip delimiters
+                if "\n\n---\n\n" in text and "**Question:**" in text:
+                    blocks = [b.strip() for b in text.split("\n\n---\n\n") if b.strip()]
+                    faq_chunks = []
+                    for i, block in enumerate(blocks):
+                        if block.startswith("# ") and "**Question:**" not in block:
+                            continue
+                        faq_chunks.append({
+                            "text": block,
+                            "chunk_index": len(faq_chunks),
+                            "start": 0,
+                            "end": len(block),
+                        })
+                    if faq_chunks:
+                        logger.info(f"📦 FAQ-style Markdown: {len(faq_chunks)} pre-chunked blocks (1 per Q&A)")
+                        return {
+                            "text": text,
+                            "chunks": faq_chunks,
+                            "file_path": file_path,
+                            "mime_type": mime_type,
+                            "file_ext": file_ext,
+                            "use_deepdoctection": False,
+                        }
             elif file_ext == ".html":
                 text = self._process_html(file_path)
             elif file_ext == ".csv":
@@ -132,9 +155,9 @@ class DocumentProcessor:
         Returns:
             List of chunk dictionaries with text and metadata
         """
-        # If pre-chunked data is available (from DeepDocDetection), use it directly
+        # If pre-chunked data is available (e.g. DeepDocDetection or FAQ .md), use it directly
         if pre_chunked:
-            logger.info(f"📦 Using {len(pre_chunked)} pre-chunked layout-aware chunks from DeepDocDetection")
+            logger.info(f"📦 Using {len(pre_chunked)} pre-chunked chunks")
             # Add title context if provided
             if title:
                 for chunk in pre_chunked:
@@ -142,6 +165,23 @@ class DocumentProcessor:
                         chunk["text"] = f"Document: {title}\n\n{chunk['text']}"
             return pre_chunked
         
+        # FAQ-style Markdown: one chunk per block (split by ---)
+        # Our FAQ normalization script uses "\n\n---\n\n" between Q&A blocks
+        if "\n\n---\n\n" in text and "**Question:**" in text:
+            blocks = [b.strip() for b in text.split("\n\n---\n\n") if b.strip()]
+            # Skip pure title line (e.g. "# All FAQs ...") so it doesn't become a chunk
+            chunks = []
+            for i, block in enumerate(blocks):
+                if block.startswith("# ") and "**Question:**" not in block:
+                    continue
+                chunk = self._create_chunk(block, len(chunks), title)
+                chunks.append(chunk)
+            if chunks:
+                logger.info(
+                    f"📦 Created {len(chunks)} FAQ chunks (1 per Q&A block, separator: ---)"
+                )
+                return chunks
+            # fall through if no valid blocks
         # Default chunking using LangChain
         chunk_size = chunk_size or settings.RAG_CHUNK_SIZE
         chunk_overlap = chunk_overlap or settings.RAG_CHUNK_OVERLAP

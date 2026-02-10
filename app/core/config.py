@@ -87,14 +87,11 @@ class Settings(BaseSettings):
     ALLOWED_EXTENSIONS: list[str] = [".pdf", ".jpg", ".jpeg", ".png", ".xlsx"]
     
     # RAG Configuration
-    # LLM Settings (dynamic - can be changed via config)
-    LLM_PROVIDER: str = "gemini"  # gemini, groq, openai, anthropic, etc.
-    LLM_API_KEY: Optional[str] = None
-    LLM_MODEL_NAME: Optional[str] = "gemini-2.5-flash-lite"  # Model name (e.g., "gemini-pro", "gpt-4", etc.)
+    # LLM Settings (Groq only)
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 2048
     
-    # Groq Settings (for text enhancement)
+    # Groq Settings (main LLM and text enhancement)
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL_NAME: str = "llama-3.3-70b-versatile"  # Groq model name
     TEXT_ENHANCEMENT_ENABLED: bool = True  # Enable LLM text enhancement before chunking

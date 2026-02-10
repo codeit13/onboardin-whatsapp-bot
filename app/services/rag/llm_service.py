@@ -1,6 +1,5 @@
 """
-LLM Service - Abstracted LLM provider interface
-Supports multiple providers (Gemini, OpenAI, Anthropic, etc.)
+LLM Service - Groq provider for RAG and text enhancement
 """
 import logging
 from typing import Optional, List, Dict, Any
@@ -29,89 +28,6 @@ class LLMService(ABC):
                              **kwargs) -> str:
         """Generate text with conversation context"""
         pass
-
-
-class GeminiLLMService(LLMService):
-    """Google Gemini LLM service implementation"""
-    
-    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
-        self.api_key = api_key or settings.LLM_API_KEY
-        self.model_name = model_name or settings.LLM_MODEL_NAME
-        
-        if not self.api_key:
-            raise ValueError("Gemini API key is required. Set LLM_API_KEY in environment.")
-        
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel(self.model_name)
-            logger.info(f"✅ Initialized Gemini LLM with model: {self.model_name}")
-        except ImportError:
-            raise ImportError("google-generativeai package is required. Install with: pip install google-generativeai")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize Gemini LLM: {str(e)}")
-            raise
-    
-    def generate(self, prompt: str, system_prompt: Optional[str] = None,
-                 temperature: Optional[float] = None,
-                 max_tokens: Optional[int] = None,
-                 **kwargs) -> str:
-        """Generate text from prompt"""
-        try:
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
-            
-            generation_config = {
-                "temperature": temperature or settings.LLM_TEMPERATURE,
-            }
-            if max_tokens:
-                generation_config["max_output_tokens"] = max_tokens
-            
-            response = self.model.generate_content(
-                full_prompt,
-                generation_config=generation_config,
-            )
-            
-            return response.text
-        except Exception as e:
-            logger.error(f"Error generating text with Gemini: {str(e)}")
-            raise
-    
-    def generate_with_context(self, messages: List[Dict[str, str]],
-                             temperature: Optional[float] = None,
-                             max_tokens: Optional[int] = None,
-                             **kwargs) -> str:
-        """Generate text with conversation context"""
-        try:
-            # Convert messages to Gemini format
-            chat = self.model.start_chat(history=[])
-            
-            # Send all messages except the last one as history
-            for msg in messages[:-1]:
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                if role == "user":
-                    chat.send_message(content)
-                elif role == "assistant":
-                    # Gemini doesn't support assistant messages in history the same way
-                    # We'll include it in the prompt instead
-                    pass
-            
-            # Send the last message
-            last_message = messages[-1].get("content", "")
-            
-            generation_config = {
-                "temperature": temperature or settings.LLM_TEMPERATURE,
-            }
-            if max_tokens:
-                generation_config["max_output_tokens"] = max_tokens
-            
-            response = chat.send_message(last_message, generation_config=generation_config)
-            return response.text
-        except Exception as e:
-            logger.error(f"Error generating text with context: {str(e)}")
-            raise
 
 
 class GroqLLMService(LLMService):
@@ -188,21 +104,6 @@ def get_llm_service(provider: Optional[str] = None,
                    api_key: Optional[str] = None,
                    model_name: Optional[str] = None) -> LLMService:
     """
-    Factory function to get LLM service based on provider
-    
-    Args:
-        provider: LLM provider name (gemini, groq, openai, etc.)
-        api_key: API key for the provider
-        model_name: Model name to use
-        
-    Returns:
-        LLMService instance
+    Factory function to get Groq LLM service.
     """
-    provider = provider or settings.LLM_PROVIDER
-    
-    if provider.lower() == "gemini":
-        return GeminiLLMService(api_key=api_key, model_name=model_name)
-    elif provider.lower() == "groq":
-        return GroqLLMService(api_key=api_key, model_name=model_name)
-    else:
-        raise ValueError(f"Unsupported LLM provider: {provider}. Supported: gemini, groq")
+    return GroqLLMService(api_key=api_key, model_name=model_name)
